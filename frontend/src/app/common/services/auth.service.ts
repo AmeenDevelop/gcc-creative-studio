@@ -23,6 +23,7 @@ import {Auth, IdTokenResult} from '@angular/fire/auth';
 import {UserService} from '../services/user.service';
 import {
   GoogleAuthProvider,
+  OAuthProvider,
   signInWithPopup,
   UserCredential,
 } from '@angular/fire/auth';
@@ -49,6 +50,7 @@ export class AuthService {
   private readonly auth: Auth = inject(Auth);
   private platformId = inject(PLATFORM_ID);
   private readonly provider: GoogleAuthProvider = new GoogleAuthProvider();
+  private readonly microsoftProvider: OAuthProvider = new OAuthProvider('oidc.microsoft');
 
   // Store token temporarily in memory for the session
   private currentOAuthAccessToken: string | null = null;
@@ -103,6 +105,42 @@ export class AuthService {
         console.error('An error occurred during the sign-in process:', error);
         return throwError(
           () => new Error(`Sign-in failed. Please try again. ${error}`),
+        );
+      }),
+    );
+  }
+
+  /**
+   * Sign in with Microsoft Entra ID via Firebase Auth OIDC provider.
+   * Uses the 'oidc.microsoft' provider configured in Identity Platform.
+   */
+  signInWithMicrosoft(): Observable<string> {
+    return from(signInWithPopup(this.auth, this.microsoftProvider)).pipe(
+      switchMap((userCredential: UserCredential) => {
+        if (!userCredential.user) {
+          return throwError(
+            () => new Error('Firebase user not found after Microsoft sign-in.'),
+          );
+        }
+        return from(userCredential.user.getIdTokenResult());
+      }),
+      switchMap((idTokenResult: IdTokenResult) => {
+        const token = idTokenResult.token;
+        const expirationTime = Date.parse(idTokenResult.expirationTime);
+
+        this.firebaseIdToken = token;
+        this.firebaseTokenExpiry = expirationTime;
+        const session: FirebaseSession = {token, expiry: expirationTime};
+        localStorage.setItem(FIREBASE_SESSION_KEY, JSON.stringify(session));
+
+        return this.syncUserWithBackend$(token).pipe(
+          map(() => token),
+        );
+      }),
+      catchError((error: any) => {
+        console.error('An error occurred during Microsoft sign-in:', error);
+        return throwError(
+          () => new Error(`Microsoft sign-in failed. Please try again. ${error}`),
         );
       }),
     );

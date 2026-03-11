@@ -152,7 +152,8 @@ start_sql_proxy() {
 
     # 2. Download Proxy (if missing)
     if [ ! -f "cloud-sql-proxy" ]; then
-        curl -o cloud-sql-proxy https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v2.8.0/cloud-sql-proxy.linux.amd64
+        local PROXY_PLATFORM=$(get_platform_arch | sed 's/_/./')
+        curl -o cloud-sql-proxy "https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v2.8.0/cloud-sql-proxy.${PROXY_PLATFORM}"
         chmod +x cloud-sql-proxy
     fi
 
@@ -272,9 +273,15 @@ install_terraform() {
     info "Installing Terraform into the persistent ~/bin directory..."
     mkdir -p "$HOME/bin"
     mv terraform "$HOME/bin/"
-    if ! grep -q 'export PATH="$HOME/bin:$PATH"' ~/.bashrc; then
+    if ! grep -q 'export PATH="$HOME/bin:$PATH"' ~/.bashrc 2>/dev/null; then
         info "Adding ~/bin to your PATH in ~/.bashrc for future sessions..."
         echo -e '\n# Add local bin to PATH\nexport PATH="$HOME/bin:$PATH"' >> ~/.bashrc
+    fi
+    if [ -n "$ZSH_VERSION" ] || [ "$SHELL" = "/bin/zsh" ]; then
+        if ! grep -q 'export PATH="$HOME/bin:$PATH"' ~/.zshrc 2>/dev/null; then
+            info "Adding ~/bin to your PATH in ~/.zshrc for future sessions..."
+            echo -e '\n# Add local bin to PATH\nexport PATH="$HOME/bin:$PATH"' >> ~/.zshrc
+        fi
     fi
     export PATH="$HOME/bin:$PATH"
     hash -r
