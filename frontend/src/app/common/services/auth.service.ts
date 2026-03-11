@@ -299,12 +299,16 @@ export class AuthService {
         }),
         catchError((error: HttpErrorResponse) => {
           console.error('Failed to sync user with backend', error);
-          // This is a critical error, so we should propagate it.
+          const detail =
+            error?.error?.detail ??
+            (typeof error?.error === 'string' ? error.error : null) ??
+            error?.message;
+          const status = error?.status;
           return throwError(
             () =>
               new Error(
-                error?.error?.detail ||
-                  `Could not synchronize user profile with the server. ${error?.error?.detail}`,
+                detail ||
+                  `Could not synchronize user profile with the server. ${status ? `(HTTP ${status})` : 'Check network and console.'}`,
               ),
           );
         }),
