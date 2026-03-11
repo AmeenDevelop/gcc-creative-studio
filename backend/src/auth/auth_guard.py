@@ -55,35 +55,41 @@ async def get_current_user(
     try:
         decoded_token = {}
         if config_service.ENVIRONMENT == "local":
-            # --- Local: Use Firebase Auth ---
-            # Verifies the token using the standard Firebase Admin SDK method.
             logger.info("Verifying token using Firebase Admin SDK...")
             decoded_token = await asyncio.to_thread(auth.verify_id_token, token)
         else:
-            # --- Development/Production: Use Google Identity Platform (OIDC) ---
-            # Verifies the Google-issued OIDC ID token. The audience must be the
-            # OAuth 2.0 client ID of the Identity Platform-protected resource.
-            GOOGLE_TOKEN_AUDIENCE = config_service.GOOGLE_TOKEN_AUDIENCE
-            decoded_token = await asyncio.to_thread(
-                id_token.verify_oauth2_token,
-                token,
-                google_auth_requests.Request(),
-                audience=GOOGLE_TOKEN_AUDIENCE,
-            )
+            # Try Firebase token first (covers Google popup and Microsoft OIDC
+            # flows that go through Firebase Auth / signInWithPopup).
+            # Fall back to raw Google OIDC verification for Google One Tap tokens.
+            try:
+                decoded_token = await asyncio.to_thread(
+                    auth.verify_id_token, token
+                )
+            except Exception:
+                GOOGLE_TOKEN_AUDIENCE = config_service.GOOGLE_TOKEN_AUDIENCE
+                decoded_token = await asyncio.to_thread(
+                    id_token.verify_oauth2_token,
+                    token,
+                    google_auth_requests.Request(),
+                    audience=GOOGLE_TOKEN_AUDIENCE,
+                )
 
         email = decoded_token.get("email")
         name = decoded_token.get("name")
         picture = decoded_token.get("picture", "")
         token_info_hd = decoded_token.get("hd")
 
-        # Restrict by particular organizations if it's a closed environment
+        # For OIDC providers (e.g. Microsoft Entra ID) the 'hd' claim is absent;
+        # derive the domain from the email address as a fallback.
+        if not token_info_hd and email and "@" in email:
+            token_info_hd = email.split("@")[1]
+
         if not email:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Forbidden: User identity could not be confirmed from token.",
             )
 
-        # If ALLOWED_ORGS is configured, check the user's organization.
         if config_service.ALLOWED_ORGS:
             if (
                 not token_info_hd

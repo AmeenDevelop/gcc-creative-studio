@@ -128,6 +128,26 @@ export class LoginComponent {
     }
   }
 
+  loginWithMicrosoft() {
+    this.loader = true;
+    this.invalidLogin = false;
+    this.errorMessage = '';
+
+    this.authService.signInWithMicrosoft().subscribe({
+      next: (token: string) => {
+        this.ngZone.run(() => {
+          this.loader = false;
+          void this.router.navigate([HOME_ROUTE]);
+        });
+      },
+      error: error => {
+        this.loader = false;
+        this.handleLoginError(error);
+        console.error('Microsoft Login Process Error:', error);
+      },
+    });
+  }
+
   private handleLoginError(
     error: any,
     postErrorAction?: () => void,
