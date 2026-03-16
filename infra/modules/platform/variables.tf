@@ -23,6 +23,12 @@ variable "firebase_site_id" {
   default     = ""
 }
 
+variable "additional_cors_origins" {
+  type        = list(string)
+  description = "Additional CORS origins for the backend (e.g. custom domains). The default Firebase URL is always included."
+  default     = []
+}
+
 # Backend specific variables
 variable "backend_service_name" { type = string }
 variable "backend_custom_audiences" { type = list(string) }

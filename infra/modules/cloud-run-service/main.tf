@@ -86,18 +86,18 @@ resource "google_cloud_run_v2_service" "this" {
         value = google_service_account.run_sa.email
       }
 
-      # non secret env vars
+      # non secret env vars (sorted for deterministic plan output)
       dynamic "env" {
-        for_each = var.container_env_vars
+        for_each = { for k in sort(keys(var.container_env_vars)) : k => var.container_env_vars[k] }
         content {
           name  = env.key
           value = env.value
         }
       }
 
-      # secrets
+      # secrets (sorted for deterministic plan output)
       dynamic "env" {
-        for_each = var.runtime_secrets
+        for_each = { for k in sort(keys(var.runtime_secrets)) : k => var.runtime_secrets[k] }
         content {
           name = env.key # The ENV_VAR_NAME
           value_source {

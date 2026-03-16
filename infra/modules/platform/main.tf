@@ -53,13 +53,14 @@ locals {
   region_code  = join("", [for s in split("-", var.gcp_region) : substr(s, 0, 1)])
   backend_url = "https://${var.backend_service_name}-${data.google_project.project.number}.${var.gcp_region}.run.app"
 
-  frontend_url = "https://${var.firebase_site_id}.web.app" # Predictable Firebase URL
+  frontend_url  = "https://${var.firebase_site_id}.web.app" # Predictable Firebase URL
+  cors_origins  = jsonencode(concat([local.frontend_url], var.additional_cors_origins))
 
   backend_env_vars = merge(
     lookup(var.be_env_vars, "common", {}),
     lookup(var.be_env_vars, var.environment, {}),
     {
-      "CORS_ORIGINS"           = "[\"${local.frontend_url}\"]"
+      "CORS_ORIGINS"           = local.cors_origins
       "GENMEDIA_BUCKET"        = google_storage_bucket.genmedia.name
       "SIGNING_SA_EMAIL"       = google_service_account.bucket_reader_sa.email
       "BACKEND_URL"            = local.backend_url
