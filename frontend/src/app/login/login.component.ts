@@ -42,6 +42,8 @@ export class LoginComponent {
   invalidLogin = false;
   errorMessage = '';
   isBrowser: boolean;
+  // Shown only when a Microsoft OIDC provider ID is configured.
+  microsoftEnabled = !!environment.MICROSOFT_OIDC_PROVIDER_ID;
 
   constructor(
     private authService: AuthService,
@@ -126,6 +128,26 @@ export class LoginComponent {
         },
       });
     }
+  }
+
+  loginWithMicrosoft() {
+    this.loader = true;
+    this.invalidLogin = false;
+    this.errorMessage = '';
+
+    this.authService.signInWithMicrosoft().subscribe({
+      next: () => {
+        this.ngZone.run(() => {
+          this.loader = false;
+          void this.router.navigate([HOME_ROUTE]);
+        });
+      },
+      error: error => {
+        this.loader = false;
+        this.handleLoginError(error);
+        console.error('Microsoft Login Process Error:', error);
+      },
+    });
   }
 
   private handleLoginError(error: any, postErrorAction?: () => void) {

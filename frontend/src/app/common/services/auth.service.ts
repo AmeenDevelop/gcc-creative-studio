@@ -23,6 +23,7 @@ import {Auth, IdTokenResult} from '@angular/fire/auth';
 import {UserService} from '../services/user.service';
 import {
   GoogleAuthProvider,
+  OAuthProvider,
   signInWithPopup,
   UserCredential,
 } from '@angular/fire/auth';
@@ -37,9 +38,16 @@ const FIREBASE_SESSION_KEY = 'firebase_session';
 const USER_DETAILS = 'USER_DETAILS';
 const LOGIN_ROUTE = '/login';
 
+type LoginProvider = 'google' | 'microsoft';
+
 interface FirebaseSession {
   token: string;
   expiry: number; // Expiration timestamp in milliseconds
+  // Which provider produced this token. When 'microsoft', `token` is the
+  // raw Microsoft Entra ID token (NOT a Firebase token) so the backend
+  // can verify the `groups` claim. Older sessions (without this field)
+  // are treated as 'google' for backwards compatibility.
+  provider?: LoginProvider;
 }
 
 @Injectable({
@@ -54,6 +62,10 @@ export class AuthService {
   private currentOAuthAccessToken: string | null = null;
   private firebaseIdToken: string | null = null; // To store the Firebase token for the test
   private firebaseTokenExpiry: number | null = null; // To store token expiration time (in ms)
+  // Which provider the active session was issued by. Used to decide
+  // whether to send the Firebase token or the raw Microsoft Entra ID
+  // token as the bearer to the backend.
+  private loginProvider: LoginProvider = 'google';
 
   constructor(
     private router: Router,
@@ -65,6 +77,81 @@ export class AuthService {
       prompt: 'select_account',
     });
     this.loadSessionFromStorage();
+  }
+
+  /**
+   * Sign in with Microsoft Entra ID via the Identity Platform OIDC
+   * provider (e.g. 'oidc.microsoft'). After Firebase's popup completes,
+   * we capture the ORIGINAL Microsoft ID token (not the Firebase token)
+   * via OAuthProvider.credentialFromResult, because the backend needs
+   * the Microsoft-signed token to verify the security-group claim.
+   */
+  signInWithMicrosoft(): Observable<string> {
+    const providerId = environment.MICROSOFT_OIDC_PROVIDER_ID;
+    if (!providerId) {
+      return throwError(
+        () =>
+          new Error(
+            'Microsoft sign-in is not configured. ' +
+              'Set MICROSOFT_OIDC_PROVIDER_ID in the environment.',
+          ),
+      );
+    }
+
+    const msProvider = new OAuthProvider(providerId);
+    msProvider.setCustomParameters({prompt: 'select_account'});
+    // Ask Entra for `openid`/`profile`/`email` so the ID token carries
+    // standard identity claims. The `groups` claim is configured on the
+    // App Registration side, not via scopes.
+    msProvider.addScope('openid');
+    msProvider.addScope('profile');
+    msProvider.addScope('email');
+
+    return from(signInWithPopup(this.auth, msProvider)).pipe(
+      switchMap((userCredential: UserCredential) => {
+        if (!userCredential.user) {
+          return throwError(
+            () =>
+              new Error('Firebase user not found after Microsoft sign-in.'),
+          );
+        }
+        const credential = OAuthProvider.credentialFromResult(userCredential);
+        const msIdToken = credential?.idToken;
+        if (!msIdToken) {
+          return throwError(
+            () =>
+              new Error(
+                'Microsoft ID token not returned by sign-in. ' +
+                  'Verify the GCIP OIDC provider is configured to return ' +
+                  'the ID token.',
+              ),
+          );
+        }
+
+        // Parse expiry from the Microsoft ID token (`exp` is seconds
+        // since epoch). Microsoft tokens last ~1 hour by default.
+        const payload = JSON.parse(atob(msIdToken.split('.')[1]));
+        const expiry = (payload.exp as number) * 1000;
+
+        this.loginProvider = 'microsoft';
+        this.firebaseIdToken = msIdToken;
+        this.firebaseTokenExpiry = expiry;
+        const session: FirebaseSession = {
+          token: msIdToken,
+          expiry,
+          provider: 'microsoft',
+        };
+        localStorage.setItem(FIREBASE_SESSION_KEY, JSON.stringify(session));
+
+        return this.syncUserWithBackend$(msIdToken).pipe(map(() => msIdToken));
+      }),
+      catchError((error: any) => {
+        console.error('Microsoft sign-in failed:', error);
+        return throwError(
+          () => new Error(`Microsoft sign-in failed. ${error?.message ?? error}`),
+        );
+      }),
+    );
   }
 
   /**
@@ -89,9 +176,14 @@ export class AuthService {
         const expirationTime = Date.parse(idTokenResult.expirationTime);
 
         // Save session details to memory and local storage.
+        this.loginProvider = 'google';
         this.firebaseIdToken = token;
         this.firebaseTokenExpiry = expirationTime;
-        const session: FirebaseSession = {token, expiry: expirationTime};
+        const session: FirebaseSession = {
+          token,
+          expiry: expirationTime,
+          provider: 'google',
+        };
         localStorage.setItem(FIREBASE_SESSION_KEY, JSON.stringify(session));
 
         // Call the backend to get or create the user profile.
@@ -123,6 +215,13 @@ export class AuthService {
       );
     }
 
+    // Microsoft sessions: we hold the raw Entra ID token which the
+    // Firebase SDK cannot refresh on its own. Return the stored token
+    // and let the isLoggedIn() guard force a re-login when it expires.
+    if (this.loginProvider === 'microsoft') {
+      return of(this.firebaseIdToken!);
+    }
+
     // If we have a valid session, check if the Firebase Auth instance is ready.
     const currentUser = this.auth.currentUser;
     if (currentUser) {
@@ -136,7 +235,11 @@ export class AuthService {
           this.firebaseIdToken = token;
           this.firebaseTokenExpiry = expiry;
 
-          const session: FirebaseSession = {token, expiry};
+          const session: FirebaseSession = {
+            token,
+            expiry,
+            provider: 'google',
+          };
           localStorage.setItem(FIREBASE_SESSION_KEY, JSON.stringify(session));
         }),
       );
@@ -160,12 +263,14 @@ export class AuthService {
         const userEmail = payload.email?.toLowerCase();
 
         // If allowed, proceed to save session and return token
+        this.loginProvider = 'google';
         this.firebaseIdToken = idToken;
         this.firebaseTokenExpiry = payload.exp * 1000;
 
         const session: FirebaseSession = {
           token: idToken,
           expiry: this.firebaseTokenExpiry,
+          provider: 'google',
         };
         localStorage.setItem(FIREBASE_SESSION_KEY, JSON.stringify(session));
 
@@ -281,6 +386,7 @@ export class AuthService {
         // Clear Firebase session data
         this.firebaseIdToken = null;
         this.firebaseTokenExpiry = null;
+        this.loginProvider = 'google';
         localStorage.removeItem(FIREBASE_SESSION_KEY);
         localStorage.removeItem(USER_DETAILS);
         localStorage.removeItem('showTooltip');
@@ -323,6 +429,7 @@ export class AuthService {
       if (session.expiry > Date.now()) {
         this.firebaseIdToken = session.token;
         this.firebaseTokenExpiry = session.expiry;
+        this.loginProvider = session.provider ?? 'google';
       } else {
         // If expired, remove it from storage.
         localStorage.removeItem(FIREBASE_SESSION_KEY);

@@ -63,5 +63,7 @@ module "creative_studio_platform" {
   backend_secrets        = var.backend_secrets
   fe_build_substitutions = var.fe_build_substitutions
 
+  microsoft_oidc_provider_id = var.microsoft_oidc_provider_id
+
   depends_on = [ google_project_service.apis ]
 }

@@ -53,6 +53,20 @@ class ConfigService(BaseSettings):
         default="", alias="IDENTITY_PLATFORM_ALLOWED_ORGS"
     )
 
+    # --- Microsoft Entra ID (Azure AD) ---
+    # Tenant ID (Directory ID) of the Entra tenant. When empty, Entra
+    # sign-in is disabled and only Google sign-in is accepted.
+    ENTRA_TENANT_ID: str = ""
+    # Application (client) ID of the Entra App Registration. This is the
+    # `aud` claim the backend will require on Microsoft ID tokens.
+    ENTRA_CLIENT_ID: str = ""
+    # Comma-separated list of Entra security group Object IDs (GUIDs).
+    # If non-empty, the user's token MUST include at least one of these
+    # group IDs in the `groups` claim to access the API.
+    ENTRA_ALLOWED_GROUP_IDS_STR: str = Field(
+        default="", alias="ENTRA_ALLOWED_GROUP_IDS"
+    )
+
     # --- Storage ---
     # The defaults will be set in the validator below to prevent recursion.
     GENMEDIA_BUCKET: str = ""
@@ -139,6 +153,40 @@ class ConfigService(BaseSettings):
             org.strip()
             for org in self.ALLOWED_ORGS_STR.split(",")
             if org.strip()
+        )
+
+    @computed_field
+    @property
+    def ENTRA_ALLOWED_GROUP_IDS(self) -> set[str]:
+        return set(
+            gid.strip()
+            for gid in self.ENTRA_ALLOWED_GROUP_IDS_STR.split(",")
+            if gid.strip()
+        )
+
+    @computed_field
+    @property
+    def ENTRA_ENABLED(self) -> bool:
+        return bool(self.ENTRA_TENANT_ID and self.ENTRA_CLIENT_ID)
+
+    @computed_field
+    @property
+    def ENTRA_ISSUER(self) -> str:
+        # Microsoft Entra v2.0 issuer format.
+        return (
+            f"https://login.microsoftonline.com/{self.ENTRA_TENANT_ID}/v2.0"
+            if self.ENTRA_TENANT_ID
+            else ""
+        )
+
+    @computed_field
+    @property
+    def ENTRA_JWKS_URL(self) -> str:
+        return (
+            "https://login.microsoftonline.com/"
+            f"{self.ENTRA_TENANT_ID}/discovery/v2.0/keys"
+            if self.ENTRA_TENANT_ID
+            else ""
         )
 
     @computed_field

@@ -17,6 +17,7 @@
 import asyncio
 import logging
 
+import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from firebase_admin import auth
@@ -25,6 +26,7 @@ from firebase_admin import auth
 from google.auth.transport import requests as google_auth_requests
 from google.oauth2 import id_token
 
+from src.auth import entra_token_service
 from src.config.config_service import config_service
 from src.users.user_model import UserModel, UserRoleEnum
 from src.users.user_service import UserService
@@ -41,6 +43,53 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 logger = logging.getLogger(__name__)
 
 
+def _enforce_entra_group_membership(claims: dict) -> None:
+    """Reject the request unless the user is a member of an allowed group.
+
+    Skipped (no-op) when ``ENTRA_ALLOWED_GROUP_IDS`` is empty so deployments
+    can opt in to group-based restriction. When required, the token's
+    ``groups`` claim must contain at least one of the configured group IDs.
+    """
+    allowed = config_service.ENTRA_ALLOWED_GROUP_IDS
+    if not allowed:
+        return
+
+    if entra_token_service.has_overage(claims):
+        # The user is in too many groups for Entra to inline them in the
+        # token. Configure the App Registration's Token configuration
+        # to emit "Groups assigned to the application" to keep the
+        # list bounded.
+        logger.error(
+            "Entra token signals groups overage; cannot verify membership "
+            "without a Graph API call. Configure the App Registration to "
+            "emit only assigned groups."
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Forbidden: token signalled too many groups. Ask the "
+                "administrator to scope the 'groups' claim to assigned "
+                "groups only."
+            ),
+        )
+
+    token_groups = set(entra_token_service.extract_group_ids(claims))
+    if not token_groups & allowed:
+        logger.warning(
+            "Entra user is not in any allowed security group. "
+            "User groups=%s allowed=%s",
+            sorted(token_groups),
+            sorted(allowed),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Forbidden: user is not a member of an allowed security "
+                "group."
+            ),
+        )
+
+
 async def get_current_user(
     token: str = Depends(oauth2_scheme),
     user_service: UserService = Depends(UserService),
@@ -55,8 +104,29 @@ async def get_current_user(
     5. Returns a Pydantic model with the user's data.
     """
     try:
-        decoded_token = {}
-        if config_service.ENVIRONMENT == "local":
+        decoded_token: dict = {}
+        is_microsoft_token = entra_token_service.is_entra_token(token)
+
+        if is_microsoft_token:
+            # --- Microsoft Entra ID path ---
+            # Verify the raw Microsoft-signed ID token (sent by the
+            # frontend after Firebase signInWithPopup against the OIDC
+            # provider). The Firebase ID token would NOT carry the
+            # `groups` claim, so we must verify the original Entra
+            # token to enforce security-group membership.
+            try:
+                decoded_token = await asyncio.to_thread(
+                    entra_token_service.verify_entra_token, token
+                )
+            except jwt.InvalidTokenError as exc:
+                logger.warning("Entra token verification failed: %s", exc)
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail=f"Invalid Microsoft ID token: {exc}",
+                ) from exc
+
+            _enforce_entra_group_membership(decoded_token)
+        elif config_service.ENVIRONMENT == "local":
             # --- Local: Use Firebase Auth ---
             # Verifies the token using the standard Firebase Admin SDK method.
             logger.info("Verifying token using Firebase Admin SDK...")
@@ -74,10 +144,16 @@ async def get_current_user(
                 audience=google_token_audience,
             )
 
-        email = decoded_token.get("email")
+        email = decoded_token.get("email") or decoded_token.get(
+            "preferred_username"
+        )
         name = decoded_token.get("name")
         picture = decoded_token.get("picture", "")
         token_info_hd = decoded_token.get("hd")
+        # Entra tokens don't carry `hd`; derive the org from the email
+        # domain so existing ALLOWED_ORGS checks still apply if desired.
+        if not token_info_hd and email and "@" in email:
+            token_info_hd = email.split("@", 1)[1]
 
         # Restrict by particular organizations if it's a closed environment
         if not email:
@@ -90,6 +166,8 @@ async def get_current_user(
             )
 
         # If ALLOWED_ORGS is configured, check the user's organization.
+        # For Microsoft sign-ins, the per-group check above is the primary
+        # restriction; the org check still applies as defence-in-depth.
         if config_service.ALLOWED_ORGS:
             if (
                 not token_info_hd

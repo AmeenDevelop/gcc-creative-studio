@@ -46,6 +46,20 @@
     >
       Login with Google
     </button>
+    <ng-container *ngIf="microsoftEnabled">
+      <div class="w-full max-w-xs flex items-center my-3">
+        <div class="flex-grow border-t border-white/30"></div>
+        <span class="mx-3 text-white/60 text-sm font-normal">or</span>
+        <div class="flex-grow border-t border-white/30"></div>
+      </div>
+      <button
+        mat-raised-button
+        (click)="loginWithMicrosoft()"
+        class="w-full max-w-xs h-12 text-lg login-btn-microsoft"
+      >
+        Login with Microsoft
+      </button>
+    </ng-container>
     <mat-spinner class="mt-5" [diameter]="50" *ngIf="this.loader"></mat-spinner>
   </div>
 
@@ -69,7 +83,7 @@
       </mat-card-header>
       <mat-card-content class="flex flex-col items-center">
         <p class="register-text mb-4">
-          Single Sign on with your Google Account
+          Sign in with your account
         </p>
         <button
           mat-raised-button
@@ -79,6 +93,20 @@
         >
           Login with Google
         </button>
+        <ng-container *ngIf="microsoftEnabled">
+          <div class="w-full flex items-center my-3">
+            <div class="flex-grow border-t border-white/30"></div>
+            <span class="mx-3 text-white/60 text-sm font-normal">or</span>
+            <div class="flex-grow border-t border-white/30"></div>
+          </div>
+          <button
+            mat-raised-button
+            (click)="loginWithMicrosoft()"
+            class="w-full h-12 text-lg login-btn-microsoft"
+          >
+            Login with Microsoft
+          </button>
+        </ng-container>
         <mat-spinner
           class="mt-5 m-auto"
           [diameter]="50"

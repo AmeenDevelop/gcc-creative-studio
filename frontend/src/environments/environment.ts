@@ -31,4 +31,8 @@ export const environment = {
     /^(([^<>()[\]\\.,;:\s@"]+(\.[^<>()[\]\\.,;:\s@"]+)*)|(".+"))@((\[\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/,
   ADMIN: 'admin',
   GOOGLE_CLIENT_ID: '',
+  // Provider ID configured in GCIP / Identity Platform for Microsoft
+  // Entra OIDC (e.g. 'oidc.microsoft'). Empty string hides the
+  // "Login with Microsoft" button.
+  MICROSOFT_OIDC_PROVIDER_ID: '',
 };

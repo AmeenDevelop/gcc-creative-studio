@@ -87,3 +87,9 @@ variable "backend_runtime_secrets" {
   description = "Secrets to mount in the backend container at runtime."
   default     = {}
 }
+
+variable "microsoft_oidc_provider_id" {
+  type        = string
+  description = "GCIP / Identity Platform OIDC provider ID for Microsoft Entra (e.g. 'oidc.microsoft'). Empty string disables the Microsoft login button on the frontend."
+  default     = ""
+}

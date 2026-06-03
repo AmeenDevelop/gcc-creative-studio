@@ -112,6 +112,12 @@ variable "backend_runtime_secrets" {
   description = "Secrets to mount in the backend container at runtime."
 }
 
+variable "microsoft_oidc_provider_id" {
+  type        = string
+  description = "GCIP OIDC provider ID for Microsoft Entra (e.g. 'oidc.microsoft'). Leave empty to disable Microsoft sign-in."
+  default     = ""
+}
+
 
 # --- List of APIs to enable ---
 variable "apis_to_enable" {

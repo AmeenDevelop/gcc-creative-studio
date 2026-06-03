@@ -26,17 +26,38 @@ be_env_vars = {
     ENVIRONMENT  = "development"
     GOOGLE_TOKEN_AUDIENCE = "YOUR_OAUTH_WEB_CLIENT_ID_HERE"
     IDENTITY_PLATFORM_ALLOWED_ORGS = "" # If empty then any org is allowed
+    # --- Microsoft Entra ID (optional) ---
+    # Leave the three ENTRA_* vars empty to disable Microsoft sign-in.
+    # When set, the backend will accept Microsoft-signed ID tokens and
+    # (if ENTRA_ALLOWED_GROUP_IDS is non-empty) enforce membership in
+    # at least one of the listed Entra security groups.
+    ENTRA_TENANT_ID          = ""          # Directory (tenant) ID GUID from Entra
+    ENTRA_CLIENT_ID          = ""          # Application (client) ID of the Entra App Registration
+    ENTRA_ALLOWED_GROUP_IDS  = ""          # Comma-separated Entra group Object IDs
   }
   production = {
     ENVIRONMENT  = "production"
     GOOGLE_TOKEN_AUDIENCE = "YOUR_OAUTH_WEB_CLIENT_ID_HERE"
     IDENTITY_PLATFORM_ALLOWED_ORGS = "" # If empty then any org is allowed
+    ENTRA_TENANT_ID          = ""
+    ENTRA_CLIENT_ID          = ""
+    ENTRA_ALLOWED_GROUP_IDS  = ""
   }
 }
 
 fe_build_substitutions = {
   _ANGULAR_BUILD_COMMAND = "build-dev"
+  # GCIP / Identity Platform OIDC provider ID for Microsoft Entra (e.g.
+  # "oidc.microsoft"). Leave empty to hide the "Login with Microsoft"
+  # button. The value must match the Provider ID you configured in the
+  # GCP console under "Identity Platform" → "Providers" → your OIDC
+  # provider.
+  _MICROSOFT_OIDC_PROVIDER_ID = ""
 }
+
+# Top-level variable consumed by the platform module; mirrors the
+# substitution above so the frontend build receives it.
+microsoft_oidc_provider_id = ""
 
 frontend_secrets = [
   "FIREBASE_API_KEY",          # Your Firebase Web API Key
