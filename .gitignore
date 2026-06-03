@@ -8,6 +8,9 @@ local/
 .aider*
 .vscode
 
+# Cloud SQL Auth Proxy binary (downloaded by bootstrap.sh at runtime)
+cloud-sql-proxy
+
 # Terraform state and providers
 /.terraform/
 
