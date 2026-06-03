@@ -131,23 +131,26 @@ read_state() {
 }
 
 # --- Database Connectivity Helpers ---
+get_db_instance_connection_name() {
+    local conn_name=""
+    pushd "$REPO_ROOT/infra/environments/$ENV_NAME" > /dev/null
+    conn_name=$(terraform output -raw cloud_sql_connection_name 2>/dev/null)
+    popd > /dev/null
+
+    if [ -z "$conn_name" ]; then
+        conn_name=$(gcloud sql instances list --format="value(connectionName)" --filter="name:creative-studio-db*" --project="$GCP_PROJECT_ID" | head -n 1)
+    fi
+
+    if [ -z "$conn_name" ]; then
+        fail "Could not find Cloud SQL instance. Ensure Terraform ran successfully."
+    fi
+    echo "$conn_name"
+}
+
 start_sql_proxy() {
     info "Starting Cloud SQL Auth Proxy..."
     
-    # 1. Get Instance Connection Name
-    # Try Terraform output first, fallback to gcloud
-    pushd "$REPO_ROOT/infra/environments/$ENV_NAME" > /dev/null
-    DB_INSTANCE_NAME=$(terraform output -raw cloud_sql_connection_name 2>/dev/null)
-    popd > /dev/null
-
-    if [ -z "$DB_INSTANCE_NAME" ]; then
-        DB_INSTANCE_NAME=$(gcloud sql instances list --format="value(connectionName)" --filter="name:creative-studio-db*" --project="$GCP_PROJECT_ID" | head -n 1)
-    fi
-
-    if [ -z "$DB_INSTANCE_NAME" ]; then
-        fail "Could not find Cloud SQL instance. Ensure Terraform ran successfully."
-    fi
-
+    DB_INSTANCE_NAME=$(get_db_instance_connection_name)
     export INSTANCE_CONNECTION_NAME="$DB_INSTANCE_NAME"
 
     # 2. Download Proxy (if missing)
@@ -194,6 +197,14 @@ export_db_vars() {
     export DB_HOST="127.0.0.1" # Proxy address
     export DB_PORT="5432"
     export USE_CLOUD_SQL_AUTH_PROXY=true
+}
+
+# For seeding: use Cloud SQL Python Connector instead of proxy. The connector uses
+# the Cloud SQL Admin API and does not require authorized networks or the proxy binary.
+export_db_vars_for_seeding() {
+    export_db_vars
+    export INSTANCE_CONNECTION_NAME=$(get_db_instance_connection_name)
+    export USE_CLOUD_SQL_AUTH_PROXY=false
 }
 
 # --- Script Functions ---
@@ -703,11 +714,9 @@ seed_data() {
     info "Project:      ${C_YELLOW}${GCP_PROJECT_ID}${C_RESET}"
     info "Deploying as: ${C_YELLOW}${CURRENT_USER}${C_RESET}"
 
-    # Establish Database Connectivity
-    export_db_vars
-    start_sql_proxy
-    # Ensure proxy stops even if this function fails
-    trap stop_sql_proxy EXIT
+    # Use Cloud SQL Python Connector (no proxy). Connector uses Admin API, bypasses
+    # authorized networks, and works from any machine with gcloud auth.
+    export_db_vars_for_seeding
 
     # Temporarily change to the project root so Python module resolution works
     pushd "$REPO_ROOT" > /dev/null
@@ -755,10 +764,6 @@ seed_data() {
 
     # Return to the original directory
     popd > /dev/null
-
-    # Cleanup
-    stop_sql_proxy
-    trap - EXIT
 }
 
 
